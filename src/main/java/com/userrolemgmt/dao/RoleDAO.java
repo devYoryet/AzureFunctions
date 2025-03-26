@@ -79,38 +79,35 @@ public class RoleDAO {
 
     // Crear un nuevo rol
     public Role createRole(Role role) throws SQLException {
-        String query = "INSERT INTO roles (role_name, description) VALUES (?, ?)";
+        // Usar bloque PL/SQL con RETURNING INTO para Oracle
+        String oracleQuery = "BEGIN " +
+                "  INSERT INTO roles (role_name, description) " +
+                "  VALUES (?, ?) " +
+                "  RETURNING role_id, created_at, updated_at INTO ?, ?, ?; " +
+                "END;";
 
-        try (PreparedStatement pstmt = connection.prepareStatement(query, Statement.RETURN_GENERATED_KEYS)) {
-            pstmt.setString(1, role.getRoleName());
-            pstmt.setString(2, role.getDescription());
+        try (CallableStatement cstmt = connection.prepareCall(oracleQuery)) {
+            // Parámetros de entrada
+            cstmt.setString(1, role.getRoleName());
+            cstmt.setString(2, role.getDescription());
 
-            int rowsAffected = pstmt.executeUpdate();
+            // Registrar parámetros de salida
+            cstmt.registerOutParameter(3, Types.NUMERIC); // role_id
+            cstmt.registerOutParameter(4, Types.TIMESTAMP); // created_at
+            cstmt.registerOutParameter(5, Types.TIMESTAMP); // updated_at
 
-            if (rowsAffected > 0) {
-                try (ResultSet rs = pstmt.getGeneratedKeys()) {
-                    if (rs.next()) {
-                        long roleId = rs.getLong(1);
-                        role.setRoleId(roleId);
+            cstmt.execute();
 
-                        // Obtener datos adicionales con una consulta separada
-                        try (PreparedStatement stmt = connection
-                                .prepareStatement("SELECT created_at, updated_at FROM roles WHERE role_id = ?")) {
-                            stmt.setLong(1, roleId);
-                            try (ResultSet timeRs = stmt.executeQuery()) {
-                                if (timeRs.next()) {
-                                    role.setCreatedAt(timeRs.getTimestamp("created_at"));
-                                    role.setUpdatedAt(timeRs.getTimestamp("updated_at"));
-                                }
-                            }
-                        }
+            // Obtener valores devueltos
+            role.setRoleId(cstmt.getLong(3));
+            role.setCreatedAt(cstmt.getTimestamp(4));
+            role.setUpdatedAt(cstmt.getTimestamp(5));
 
-                        return role;
-                    }
-                }
-            }
+            return role;
 
-            return null;
+        } catch (SQLException e) {
+            LOGGER.log(Level.SEVERE, "Error al crear rol", e);
+            throw e;
         }
     }
 
