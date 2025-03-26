@@ -1,8 +1,14 @@
 package com.userrolemgmt.util;
 
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -13,101 +19,178 @@ public class DatabaseConnection {
 
     private DatabaseConnection() {
         try {
-            // Cargar driver H2
-            Class.forName("org.h2.Driver");
-            LOGGER.log(Level.INFO, "Driver H2 cargado correctamente");
-            
-            // URL para H2 en memoria
-            String url = "jdbc:h2:mem:userrolemgmt;DB_CLOSE_DELAY=-1";
-            String user = "sa";
-            String password = "";
-            
-            LOGGER.log(Level.INFO, "Conectando a H2 en memoria con URL: " + url);
+            // Load Oracle JDBC Driver
+            Class.forName("oracle.jdbc.driver.OracleDriver");
+            LOGGER.log(Level.INFO, "Oracle JDBC Driver loaded successfully");
+
+            // Create a temporary directory for the wallet
+            File tempDir = Files.createTempDirectory("oracle_wallet").toFile();
+            tempDir.deleteOnExit(); // Ensure it gets deleted on exit
+
+            // Copy wallet files to the temporary directory
+            copyWalletFiles(tempDir);
+
+            // Set wallet location
+            String walletPath = tempDir.getAbsolutePath();
+            String user = "DCN2_DB";
+            String password = "8xeZzy-jokgew";
+            String url = "jdbc:oracle:thin:@(description=(address=(protocol=tcps)(port=1522)(host=adb.sa-santiago-1.oraclecloud.com))(connect_data=(service_name=g5775c4e4540b4a_swzaddavly6hv92c_high.adb.oraclecloud.com))(security=(wallet_location="
+                    + walletPath + ")))";
+
+            // connection = DriverManager.getConnection(url, user, password);
+
+            LOGGER.log(Level.INFO, "Connecting to Oracle Autonomous Database with URL: " + url);
             connection = DriverManager.getConnection(url, user, password);
-            LOGGER.log(Level.INFO, "Conexión a H2 establecida correctamente");
-            
+            LOGGER.log(Level.INFO, "Connection to Oracle DB established successfully");
+
             initializeDatabase();
-            
+
         } catch (ClassNotFoundException e) {
-            LOGGER.log(Level.SEVERE, "Driver H2 no encontrado", e);
-            throw new RuntimeException("Driver H2 no encontrado", e);
+            LOGGER.log(Level.SEVERE, "Oracle JDBC Driver not found", e);
+            throw new RuntimeException("Oracle JDBC Driver not found", e);
         } catch (SQLException e) {
-            LOGGER.log(Level.SEVERE, "Error al conectar a la base de datos H2", e);
-            throw new RuntimeException("Error de conexión a H2", e);
+            LOGGER.log(Level.SEVERE, "Error connecting to Oracle Database", e);
+            throw new RuntimeException("Connection error to Oracle DB", e);
+        } catch (IOException e) {
+            LOGGER.log(Level.SEVERE, "Error setting up wallet files", e);
+            throw new RuntimeException("Error setting up wallet files", e);
         } catch (Exception e) {
-            LOGGER.log(Level.SEVERE, "Error general", e);
-            throw new RuntimeException("Error general: " + e.getMessage(), e);
+            LOGGER.log(Level.SEVERE, "General error", e);
+            throw new RuntimeException("General error: " + e.getMessage(), e);
         }
     }
-    
+
+    private void copyWalletFiles(File destinationDir) throws IOException {
+        // Copy each wallet file from the resources folder to the temporary directory
+        String[] walletFiles = { "cwallet.sso", "ewallet.p12", "keystore.jks" }; // Add any other wallet files you need
+
+        for (String fileName : walletFiles) {
+            try (InputStream in = getClass().getClassLoader().getResourceAsStream("wallet/" + fileName)) {
+                if (in == null) {
+                    throw new IOException("Wallet file not found in resources: " + fileName);
+                }
+                File outFile = new File(destinationDir, fileName);
+                try (FileOutputStream out = new FileOutputStream(outFile)) {
+                    byte[] buffer = new byte[1024];
+                    int bytesRead;
+                    while ((bytesRead = in.read(buffer)) != -1) {
+                        out.write(buffer, 0, bytesRead);
+                    }
+                }
+            }
+        }
+    }
+
     private void initializeDatabase() {
         try {
-            LOGGER.log(Level.INFO, "Inicializando esquema de base de datos");
-            
-            try (java.sql.Statement stmt = connection.createStatement()) {
-                // Crear tabla de usuarios
-                stmt.execute("CREATE TABLE users (" +
-                        "user_id INT AUTO_INCREMENT PRIMARY KEY, " +
-                        "username VARCHAR(100) NOT NULL, " +
-                        "email VARCHAR(255) NOT NULL, " +
-                        "password_hash VARCHAR(255) NOT NULL, " +
-                        "first_name VARCHAR(100), " +
-                        "last_name VARCHAR(100), " +
-                        "active BOOLEAN DEFAULT TRUE, " +
+            LOGGER.log(Level.INFO, "Initializing database schema");
+
+            try (Statement stmt = connection.createStatement()) {
+                // Check and create users table if it doesn't exist
+                String createUsersTable = "BEGIN "
+                        + "  EXECUTE IMMEDIATE 'CREATE TABLE users (" +
+                        "user_id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, " +
+                        "username VARCHAR2(100) NOT NULL, " +
+                        "email VARCHAR2(255) NOT NULL, " +
+                        "password_hash VARCHAR2(255) NOT NULL, " +
+                        "first_name VARCHAR2(100), " +
+                        "last_name VARCHAR2(100), " +
+                        "active CHAR(1) DEFAULT ''Y'', " +
                         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
-                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-                
-                // Crear tabla de roles
-                stmt.execute("CREATE TABLE roles (" +
-                        "role_id INT AUTO_INCREMENT PRIMARY KEY, " +
-                        "role_name VARCHAR(100) NOT NULL, " +
-                        "description VARCHAR(255), " +
+                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)'; "
+                        + "EXCEPTION "
+                        + "  WHEN OTHERS THEN "
+                        + "    IF SQLCODE != -955 THEN "
+                        + "      RAISE; "
+                        + "    END IF; "
+                        + "END;";
+                stmt.execute(createUsersTable);
+
+                // Check and create roles table if it doesn't exist
+                String createRolesTable = "BEGIN "
+                        + "  EXECUTE IMMEDIATE 'CREATE TABLE roles (" +
+                        "role_id NUMBER GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY, " +
+                        "role_name VARCHAR2(100) NOT NULL, " +
+                        "description VARCHAR2(255), " +
                         "created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
-                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)");
-                
-                // Crear tabla de relación usuario-rol
-                stmt.execute("CREATE TABLE user_roles (" +
-                        "user_id INT NOT NULL, " +
-                        "role_id INT NOT NULL, " +
+                        "updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)'; "
+                        + "EXCEPTION "
+                        + "  WHEN OTHERS THEN "
+                        + "    IF SQLCODE != -955 THEN "
+                        + "      RAISE; "
+                        + "    END IF; "
+                        + "END;";
+                stmt.execute(createRolesTable);
+
+                // Check and create user_roles table if it doesn't exist
+                String createUserRolesTable = "BEGIN "
+                        + "  EXECUTE IMMEDIATE 'CREATE TABLE user_roles (" +
+                        "user_id NUMBER NOT NULL, " +
+                        "role_id NUMBER NOT NULL, " +
                         "assigned_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, " +
                         "PRIMARY KEY (user_id, role_id), " +
                         "FOREIGN KEY (user_id) REFERENCES users(user_id), " +
-                        "FOREIGN KEY (role_id) REFERENCES roles(role_id))");
-                
-                // Insertar datos de ejemplo
-                LOGGER.log(Level.INFO, "Insertando datos de ejemplo");
-                
-                // Usuarios de ejemplo
-                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) " +
-                        "VALUES ('admin', 'admin@example.com', 'hashed_password', 'Admin', 'User')");
-                
-                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) " +
-                        "VALUES ('user1', 'user1@example.com', 'hashed_password', 'Regular', 'User')");
-                
-                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) " +
-                        "VALUES ('manager', 'manager@example.com', 'hashed_password', 'Manager', 'User')");
-                
-                // Roles de ejemplo
-                stmt.execute("INSERT INTO roles (role_name, description) " +
-                        "VALUES ('ADMIN', 'Administrator role with full access')");
-                
-                stmt.execute("INSERT INTO roles (role_name, description) " +
-                        "VALUES ('USER', 'Regular user with limited access')");
-                
-                stmt.execute("INSERT INTO roles (role_name, description) " +
-                        "VALUES ('MANAGER', 'Manager with department access')");
-                
-                // Asignaciones usuario-rol
-                stmt.execute("INSERT INTO user_roles (user_id, role_id) VALUES (1, 1)");
-                stmt.execute("INSERT INTO user_roles (user_id, role_id) VALUES (2, 2)");
-                stmt.execute("INSERT INTO user_roles (user_id, role_id) VALUES (3, 3)");
+                        "FOREIGN KEY (role_id) REFERENCES roles(role_id))'; "
+                        + "EXCEPTION "
+                        + "  WHEN OTHERS THEN "
+                        + "    IF SQLCODE != -955 THEN "
+                        + "      RAISE; "
+                        + "    END IF; "
+                        + "END;";
+                stmt.execute(createUserRolesTable);
+
+                // Insert example data (only if no data exists)
+                LOGGER.log(Level.INFO, "Inserting example data");
+
+                // Users example
+                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) "
+                        + "SELECT 'admin', 'admin@example.com', 'hashed_password', 'Admin', 'User' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'admin')");
+
+                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) "
+                        + "SELECT 'user1', 'user1@example.com', 'hashed_password', 'Regular', 'User' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'user1')");
+
+                stmt.execute("INSERT INTO users (username, email, password_hash, first_name, last_name) "
+                        + "SELECT 'manager', 'manager@example.com', 'hashed_password', 'Manager', 'User' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM users WHERE username = 'manager')");
+
+                // Roles example
+                stmt.execute("INSERT INTO roles (role_name, description) "
+                        + "SELECT 'ADMIN', 'Administrator role with full access' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_name = 'ADMIN')");
+
+                stmt.execute("INSERT INTO roles (role_name, description) "
+                        + "SELECT 'USER', 'Regular user with limited access' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_name = 'USER')");
+
+                stmt.execute("INSERT INTO roles (role_name, description) "
+                        + "SELECT 'MANAGER', 'Manager with department access' FROM DUAL "
+                        + "WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_name = 'MANAGER')");
+
+                // User-role assignments
+                stmt.execute("INSERT INTO user_roles (user_id, role_id) "
+                        + "SELECT u.user_id, r.role_id FROM users u, roles r "
+                        + "WHERE u.username = 'admin' AND r.role_name = 'ADMIN' "
+                        + "AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id)");
+
+                stmt.execute("INSERT INTO user_roles (user_id, role_id) "
+                        + "SELECT u.user_id, r.role_id FROM users u, roles r "
+                        + "WHERE u.username = 'user1' AND r.role_name = 'USER' "
+                        + "AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id)");
+
+                stmt.execute("INSERT INTO user_roles (user_id, role_id) "
+                        + "SELECT u.user_id, r.role_id FROM users u, roles r "
+                        + "WHERE u.username = 'manager' AND r.role_name = 'MANAGER' "
+                        + "AND NOT EXISTS (SELECT 1 FROM user_roles ur WHERE ur.user_id = u.user_id AND ur.role_id = r.role_id)");
+
             }
-            
-            LOGGER.log(Level.INFO, "Base de datos inicializada correctamente");
-            
+
+            LOGGER.log(Level.INFO, "Database initialized successfully");
+
         } catch (SQLException e) {
-            LOGGER.log(Level.SEVERE, "Error al inicializar la base de datos", e);
-            throw new RuntimeException("Error al inicializar la base de datos", e);
+            LOGGER.log(Level.SEVERE, "Error initializing the database", e);
+            throw new RuntimeException("Error initializing the database", e);
         }
     }
 
@@ -124,8 +207,8 @@ public class DatabaseConnection {
                 instance = new DatabaseConnection();
             }
         } catch (SQLException e) {
-            LOGGER.log(Level.SEVERE, "Error al verificar el estado de la conexión", e);
-            throw new RuntimeException("Error al verificar la conexión", e);
+            LOGGER.log(Level.SEVERE, "Error verifying connection status", e);
+            throw new RuntimeException("Error verifying connection", e);
         }
         return connection;
     }
@@ -134,12 +217,10 @@ public class DatabaseConnection {
         if (connection != null) {
             try {
                 connection.close();
-                LOGGER.log(Level.INFO, "Conexión cerrada exitosamente");
+                LOGGER.log(Level.INFO, "Connection closed successfully");
             } catch (SQLException e) {
-                LOGGER.log(Level.WARNING, "Error al cerrar la conexión", e);
+                LOGGER.log(Level.WARNING, "Error closing connection", e);
             }
         }
     }
-
-    
 }
