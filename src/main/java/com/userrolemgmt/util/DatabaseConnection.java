@@ -31,13 +31,31 @@ public class DatabaseConnection {
             copyWalletFiles(tempDir);
 
             // Set wallet location
-            String walletPath = tempDir.getAbsolutePath();
-            String user = "DCN2_DB";
-            String password = "8xeZzy-jokgew";
-            String url = "jdbc:oracle:thin:@(description=(address=(protocol=tcps)(port=1522)(host=adb.sa-santiago-1.oraclecloud.com))(connect_data=(service_name=g5775c4e4540b4a_swzaddavly6hv92c_high.adb.oraclecloud.com))(security=(wallet_location="
-                    + walletPath + ")))";
+            // String walletPath = tempDir.getAbsolutePath();
+            // String user = "DCN2_DB";
+            // String password = "8xeZzy-jokgew";
+            // String url =
+            // "jdbc:oracle:thin:@(description=(address=(protocol=tcps)(port=1522)(host=adb.sa-santiago-1.oraclecloud.com))(connect_data=(service_name=g5775c4e4540b4a_swzaddavly6hv92c_high.adb.oraclecloud.com))(security=(wallet_location="
+            // + walletPath + ")))";
 
-            // connection = DriverManager.getConnection(url, user, password);
+            String walletPath = tempDir.getAbsolutePath().replace("\\", "/");
+            // Obtener valores de variables de entorno
+            String user = System.getenv("ORACLE_USER");
+            String password = System.getenv("ORACLE_PASSWORD");
+            String tnsName = System.getenv("ORACLE_TNS_NAME");
+
+            String serviceName = System.getenv("ORACLE_SERVICE_NAME");
+
+            // Validar que las variables estén configuradas
+            if (user == null || password == null || tnsName == null) {
+                throw new RuntimeException(
+                        "Faltan variables de entorno: ORACLE_USER, ORACLE_PASSWORD, ORACLE_TNS_NAME");
+            }
+            // Construir URL usando el TNS name
+            String url = String.format(
+                    "jdbc:oracle:thin:@(description=(address=(protocol=tcps)(port=1522)(host=adb.sa-santiago-1.oraclecloud.com))(connect_data=(service_name=%s))(security=(wallet_location=%s)))",
+                    serviceName,
+                    walletPath);
 
             LOGGER.log(Level.INFO, "Connecting to Oracle Autonomous Database with URL: " + url);
             connection = DriverManager.getConnection(url, user, password);
@@ -62,7 +80,8 @@ public class DatabaseConnection {
 
     private void copyWalletFiles(File destinationDir) throws IOException {
         // Copy each wallet file from the resources folder to the temporary directory
-        String[] walletFiles = { "cwallet.sso", "ewallet.p12", "keystore.jks" }; // Add any other wallet files you need
+        String[] walletFiles = { "cwallet.sso", "ewallet.p12", "keystore.jks", "tnsnames.ora" }; // Add any other wallet
+                                                                                                 // files you need
 
         for (String fileName : walletFiles) {
             try (InputStream in = getClass().getClassLoader().getResourceAsStream("wallet/" + fileName)) {
