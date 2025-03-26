@@ -30,14 +30,6 @@ public class DatabaseConnection {
             // Copy wallet files to the temporary directory
             copyWalletFiles(tempDir);
 
-            // Set wallet location
-            // String walletPath = tempDir.getAbsolutePath();
-            // String user = "DCN2_DB";
-            // String password = "8xeZzy-jokgew";
-            // String url =
-            // "jdbc:oracle:thin:@(description=(address=(protocol=tcps)(port=1522)(host=adb.sa-santiago-1.oraclecloud.com))(connect_data=(service_name=g5775c4e4540b4a_swzaddavly6hv92c_high.adb.oraclecloud.com))(security=(wallet_location="
-            // + walletPath + ")))";
-
             String walletPath = tempDir.getAbsolutePath().replace("\\", "/");
             // Obtener valores de variables de entorno
             String user = System.getenv("ORACLE_USER");
